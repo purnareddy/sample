@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation Template to create an IAM Role with a policy.
+
+Parameters:
+  RoleName:
+    Type: String
+    Description: The name of the IAM role to create.
+    Default: MyCustomRole
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[A-Za-z0-9+=,.@_-]+'
+    ConstraintDescription: Role name must be a valid IAM role name.
+
+  PolicyName:
+    Type: String
+    Description: The name of the policy to attach to the IAM role.
+    Default: MyCustomPolicy
+    MinLength: 1
+    MaxLength: 128
+    AllowedPattern: '[A-Za-z0-9+=,.@_-]+'
+    ConstraintDescription: Policy name must be a valid IAM policy name.
+
+  PolicyDocument:
+    Type: String
+    Description: The JSON policy document for the IAM policy.
+    Default: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "s3:*",
+            "Resource": "*"
+          }
+        ]
+      }
+    NoEcho: false
+    MinLength: 1
+    MaxLength: 2048
+
+Resources:
+  MyIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+
+  MyIAMPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Ref PolicyName
+      Roles:
+        - !Ref MyIAMRole
+      PolicyDocument: !Ref PolicyDocument
+
+Outputs:
+  IAMRoleName:
+    Description: The name of the IAM role created
+    Value: !Ref MyIAMRole
+
+  IAMPolicyName:
+    Description: The name of the IAM policy attached to the role
+    Value: !Ref MyIAMPolicy
