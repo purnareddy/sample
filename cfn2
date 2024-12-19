@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CloudFormation Template to create an Application Load Balancer (ALB), Network Load Balancer (NLB), or Gateway Load Balancer (GLB) 
+  with customizable parameters for different use cases.
+
+Parameters:
+  LoadBalancerType:
+    Type: String
+    Default: "application"
+    AllowedValues:
+      - application
+      - network
+      - gateway
+    Description: "The type of load balancer to create. Choose 'application' for ALB, 'network' for NLB, and 'gateway' for GLB."
+
+  LoadBalancerName:
+    Type: String
+    Default: "MyLoadBalancer"
+    Description: "The name of the load balancer."
+
+  VPCID:
+    Type: AWS::EC2::VPC::Id
+    Description: "The VPC ID where the load balancer will be created."
+
+  Subnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: "The first subnet ID for the load balancer."
+
+  Subnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: "The second subnet ID for the load balancer."
+
+  SecurityGroupID:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: "The security group ID for the load balancer."
+
+  ListenerPort:
+    Type: Number
+    Default: 80
+    Description: "The port on which the load balancer listens."
+
+  Protocol:
+    Type: String
+    Default: "HTTP"
+    AllowedValues:
+      - HTTP
+      - HTTPS
+      - TCP
+      - TLS
+    Description: "The protocol that the load balancer uses."
+
+  HealthCheckPath:
+    Type: String
+    Default: "/"
+    Description: "The path for health checks in the target group (only for ALB)."
+
+  HealthCheckPort:
+    Type: String
+    Default: "80"
+    Description: "The port for health checks in the target group."
+
+  InstanceIds:
+    Type: CommaDelimitedList
+    Description: "A list of EC2 instance IDs to register with the target group."
+
+  IPAddresses:
+    Type: CommaDelimitedList
+    Description: "A list of IP addresses to register with the target group (only if the target type is 'ip')."
+
+  LambdaFunctionArn:
+    Type: String
+    Description: "The ARN of the Lambda function to register with the target group (only for ALB)."
+
+Resources:
+  # Load Balancer (ALB, NLB, or GLB) based on LoadBalancerType parameter
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Ref LoadBalancerName
+      Subnets:
+        - Ref: Subnet1
+        - Ref: Subnet2
+      SecurityGroups:
+        - Ref: SecurityGroupID
+      LoadBalancerType: 
+        !Ref LoadBalancerType
+      Scheme: "internet-facing"  # Can be 'internet-facing' or 'internal'
+      IpAddressType: "ipv4"
+      Tags:
+        - Key: "Environment"
+          Value: "Production"
+
+  # Load Balancer Listener
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: "fixed-response"
+          FixedResponseConfig:
+            StatusCode: 200
+            ContentType: text/plain
+            MessageBody: "OK"
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: !Ref ListenerPort
+      Protocol: !Ref Protocol
+
+  # Target Group for the Load Balancer (supports ALB and NLB)
+  LoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${LoadBalancerName}-target-group"
+      Port: !Ref ListenerPort
+      Protocol: !Ref Protocol
+      VpcId: !Ref VPCID
+      TargetType: "instance"  # Default target type
+      HealthCheckProtocol: HTTP
+      HealthCheckPort: !Ref HealthCheckPort
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+
+  # Attach EC2 Instances to the Target Group (for ALB or NLB)
+  LoadBalancerTargetGroupAttachmentInstances:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
+    Condition: RegisterInstancesCondition
+    Properties:
+      TargetGroupArn: !Ref LoadBalancerTargetGroup
+      TargetId: 
+        Fn::Select:
+          - 0
+          - Ref: InstanceIds  # Register first instance from the list
+      Port: !Ref ListenerPort
+
+  # Attach IPs to the Target Group (for NLB with target type 'ip')
+  LoadBalancerTargetGroupAttachmentIPs:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
+    Condition: RegisterIPsCondition
+    Properties:
+      TargetGroupArn: !Ref LoadBalancerTargetGroup
+      TargetId: 
+        Fn::Select:
+          - 0
+          - Ref: IPAddresses  # Register first IP from the list
+      Port: !Ref ListenerPort
+
+  # Attach Lambda function to the Target Group (for ALB with target type 'lambda')
+  LoadBalancerTargetGroupAttachmentLambda:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
+    Condition: RegisterLambdaCondition
+    Properties:
+      TargetGroupArn: !Ref LoadBalancerTargetGroup
+      TargetId: !Ref LambdaFunctionArn
+      Port: !Ref ListenerPort
+
+Conditions:
+  RegisterInstancesCondition: !Equals [!Ref LoadBalancerType, "application"]
+  RegisterIPsCondition: !Equals [!Ref LoadBalancerType, "network"]
+  RegisterLambdaCondition: !Equals [!Ref LoadBalancerType, "application"]
+
+Outputs:
+  LoadBalancerArn:
+    Description: "ARN of the Load Balancer"
+    Value: !Ref LoadBalancer
+
+  LoadBalancerDNSName:
+    Description: "DNS Name of the Load Balancer"
+    Value: !GetAtt LoadBalancer.DNSName
+
+  LoadBalancerListenerArn:
+    Description: "ARN of the Load Balancer Listener"
+    Value: !Ref LoadBalancerListener
+
+  LoadBalancerTargetGroupArn:
+    Description: "ARN of the Load Balancer Target Group"
+    Value: !Ref LoadBalancerTargetGroup
