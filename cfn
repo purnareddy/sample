@@ -1,0 +1,179 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CloudFormation Template to create a Network Load Balancer (NLB) with customizable parameters and target types (instance, IP, or Lambda).
+
+Parameters:
+  LoadBalancerName:
+    Type: String
+    Default: "MyNetworkLoadBalancer"
+    Description: "The name of the Network Load Balancer."
+
+  VPCID:
+    Type: AWS::EC2::VPC::Id
+    Description: "The VPC ID where the NLB will be created."
+
+  Subnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: "The first subnet ID for the NLB."
+
+  Subnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: "The second subnet ID for the NLB."
+
+  SecurityGroupID:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: "The security group ID for the NLB."
+
+  NLBListenerPort:
+    Type: Number
+    Default: 80
+    Description: "The port on which the NLB listens."
+
+  NLBProtocol:
+    Type: String
+    Default: "TCP"
+    AllowedValues:
+      - TCP
+      - UDP
+    Description: "The protocol that the NLB uses."
+
+  TargetType:
+    Type: String
+    Default: "instance"
+    AllowedValues:
+      - instance
+      - ip
+      - lambda
+    Description: "The target type for the NLB (instance, ip, or lambda)."
+
+  TargetPort:
+    Type: Number
+    Default: 80
+    Description: "The port on the target(s) that the NLB forwards traffic to."
+
+  HealthCheckPath:
+    Type: String
+    Default: "/"
+    Description: "The path for health checks in the target group."
+
+  HealthCheckPort:
+    Type: String
+    Default: "80"
+    Description: "The port for health checks in the target group."
+
+  InstanceIds:
+    Type: CommaDelimitedList
+    Description: "A list of EC2 instance IDs to register with the NLB target group."
+
+  IPAddresses:
+    Type: CommaDelimitedList
+    Description: "A list of IP addresses to register with the NLB target group (only if TargetType is 'ip')."
+
+  LambdaFunctionArn:
+    Type: String
+    Description: "The ARN of the Lambda function to register with the NLB target group (only if TargetType is 'lambda')."
+
+Resources:
+  # Network Load Balancer (NLB)
+  NetworkLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      Name: !Ref LoadBalancerName
+      Subnets:
+        - Ref: Subnet1
+        - Ref: Subnet2
+      SecurityGroups:
+        - Ref: SecurityGroupID
+      LoadBalancerType: "network"
+      Scheme: "internet-facing"  # Can be 'internet-facing' or 'internal'
+      IpAddressType: "ipv4"
+      Tags:
+        - Key: "Environment"
+          Value: "Production"
+
+  # NLB Listener
+  NLBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !Ref NLBTargetGroup  # Forward traffic to the target group
+      LoadBalancerArn: !Ref NetworkLoadBalancer
+      Port: !Ref NLBListenerPort
+      Protocol: !Ref NLBProtocol
+
+  # NLB Target Group
+  NLBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${LoadBalancerName}-target-group"
+      Port: !Ref TargetPort
+      Protocol: !Ref NLBProtocol
+      VpcId: !Ref VPCID
+      TargetType: !Ref TargetType
+      HealthCheckProtocol: TCP
+      HealthCheckPort: !Ref HealthCheckPort
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+
+  # Register EC2 Instances with the NLB Target Group (for target type 'instance')
+  NLBTargetGroupAttachmentInstances:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
+    Condition: RegisterInstancesCondition
+    Properties:
+      TargetGroupArn: !Ref NLBTargetGroup
+      TargetId: 
+        Fn::Select:
+          - 0
+          - Ref: InstanceIds  # Register first instance from the list
+      Port: !Ref TargetPort
+
+  # Register IPs with the NLB Target Group (for target type 'ip')
+  NLBTargetGroupAttachmentIPs:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
+    Condition: RegisterIPsCondition
+    Properties:
+      TargetGroupArn: !Ref NLBTargetGroup
+      TargetId: 
+        Fn::Select:
+          - 0
+          - Ref: IPAddresses  # Register first IP from the list
+      Port: !Ref TargetPort
+
+  # Register Lambda Function with the NLB Target Group (for target type 'lambda')
+  NLBTargetGroupAttachmentLambda:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
+    Condition: RegisterLambdaCondition
+    Properties:
+      TargetGroupArn: !Ref NLBTargetGroup
+      TargetId: !Ref LambdaFunctionArn
+      Port: !Ref TargetPort
+
+Conditions:
+  RegisterInstancesCondition: !Equals [!Ref TargetType, "instance"]
+  RegisterIPsCondition: !Equals [!Ref TargetType, "ip"]
+  RegisterLambdaCondition: !Equals [!Ref TargetType, "lambda"]
+
+Outputs:
+  NLBArn:
+    Description: "ARN of the Network Load Balancer"
+    Value: !Ref NetworkLoadBalancer
+
+  NLBDNSName:
+    Description: "DNS Name of the Network Load Balancer"
+    Value: !GetAtt NetworkLoadBalancer.DNSName
+
+  NLBListenerArn:
+    Description: "ARN of the NLB Listener"
+    Value: !Ref NLBListener
+
+  NLBTargetGroupArn:
+    Description: "ARN of the NLB Target Group"
+    Value: !Ref NLBTargetGroup
+
+  TargetType:
+    Description: "The target type used for this NLB (instance, ip, or lambda)"
+    Value: !Ref TargetType
